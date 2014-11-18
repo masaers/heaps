@@ -5,13 +5,22 @@
 
 namespace com_masaers {
 
+  namespace internal {
+    struct id_func {
+      template<typename X>
+      X&& operator()(X&& x) const { return std::forward<X>(x); }
+    };
+  };
+  
   template<typename Value,
+	   typename PriorityEx = internal::id_func,
 	   typename Comp = std::less<Value>,
 	   template<typename...> class Container = std::vector>
   class binary_heap {
   public:
     typedef std::size_t position_type;
     typedef typename std::decay<Value>::type value_type;
+    typedef typename std::decay<PriorityEx>::type priority_ex_type;
     typedef typename std::decay<Comp>::type comp_type;
   protected:
     struct node_t {
@@ -33,30 +42,14 @@ namespace com_masaers {
       value_type value_m;
       position_type position_m;
     }; // node_t
-    struct comp_t {
-      template<typename CallComp> inline comp_t(CallComp&& comp)
-	: comp_m(std::forward<CallComp>(comp))
-      {}
-      inline comp_t(const comp_t&) = default;
-      inline comp_t(comp_t&&) = default;
-      inline comp_t& operator=(comp_t x) {
-	swap(*this, x);
-	return *this;
-      }
-      friend inline void swap(comp_t& a, comp_t& b) {
-	using namespace std;
-	swap(a.comp_m, b.comp_m);
-      }
-      inline bool operator()(const node_t& a, const node_t& b) {
-	return comp_m(a.value_m, b.value_m);
-      }
-      comp_type comp_m;
-    }; // comp_t
   public:
     typedef node_t* handle_type;
     typedef Container<handle_type> container_type;
     typedef typename container_type::const_iterator const_iterator;
-    binary_heap() : container_m(), comp_m(comp_type()) {}
+    binary_heap(const PriorityEx& priority_ex = PriorityEx(),
+		const Comp& comp = Comp())
+      : container_m(), comp_m(comp), priority_ex_m(priority_ex)
+    {}
     binary_heap(const binary_heap&) = default;
     binary_heap(binary_heap&&) = default;
     template<typename CallValue>
@@ -81,38 +74,22 @@ namespace com_masaers {
     const_iterator end() const { return container_m.end(); }
     const_iterator cbegin() const { return container_m.begin(); }
     const_iterator cend() const { return container_m.end(); }
-    /**
-     * The new value needs to be *comparable to* `value_type`, that
-     * is: the following expressions need to be valid:
-     * `comp_type()(value_type(), CallValue())` and
-     * `comp_type()(CallValue(), value_type())`.
-     *
-     * The new value needs to be *assignable to* `value_type`, that
-     * is: the following expression needs to be valid: `value_type v =
-     * CallValue()`.
-     *
-     * These two conditions allows the end-user to write custom
-     * `value_type` structures that can hold the priority as well as
-     * additional payload, and provide the comparator to the priority
-     * as well as accepting only a priority value as parameter to the
-     * assignment operator.
-     */
     template<typename CallValue>
     void update(handle_type node, CallValue&& new_value) {
-      if (comp_m.comp_m(new_value, node->value_m)) {
-	node->value_m = new_value;
+      if (comp_m(new_value, priority_ex_m(node->value_m))) {
+	priority_ex_m(node->value_m) = new_value;
 	bubble_up(node);
-      } else if (comp_m.comp_m(node->value_m, new_value)) {
-	node->value_m = new_value;
+      } else if (comp_m(priority_ex_m(node->value_m), new_value)) {
+	priority_ex_m(node->value_m) = new_value;
 	bubble_down(node);
       } else {
-	node->value_m = new_value;
+	priority_ex_m(node->value_m) = new_value;
       }
     }
     template<typename CallValue>
     bool ensure_priority(handle_type node, CallValue&& new_value) {
       bool result = false;
-      if (comp_m.comp_m(new_value, node->value_m)) {
+      if (comp_m(new_value, priority_ex_m(node->value_m))) {
 	node->value_m = new_value;
 	bubble_up(node);
 	result = true;
@@ -124,7 +101,8 @@ namespace com_masaers {
     }
   protected:
     void bubble_up(handle_type node) {
-      while (! root_b(node) && comp_m(*node, *parent(node))) {
+      while (! root_b(node)
+	     && comp_nodes(node, parent(node))) {
 	swap_nodes(node, parent(node));
       }
     }
@@ -134,14 +112,14 @@ namespace com_masaers {
 	handle_type rc = rchild(node);
 	if (lc == NULL) {
 	  break;
-	} else if (rc == NULL || comp_m(*lc, *rc)) {
-	  if (comp_m(*lc, *node)) {
+	} else if (rc == NULL || comp_nodes(lc, rc)) {
+	  if (comp_nodes(lc, node)) {
 	    swap_nodes(node, lc);
 	  } else {
 	    break;
 	  }
 	} else {
-	  if (comp_m(*rc, *node)) {
+	  if (comp_nodes(rc, node)) {
 	    swap_nodes(node, rc);
 	  } else {
 	    break;
@@ -187,14 +165,26 @@ namespace com_masaers {
       }
       return result;
     }
+    inline bool comp_nodes(const handle_type a, const handle_type b) const {
+      return comp_m(priority_ex_m(a->value_m), priority_ex_m(b->value_m));
+    }
     container_type container_m;
-    comp_t comp_m;
+    comp_type comp_m;
+    priority_ex_type priority_ex_m;
   }; // binary_heap
-
-  template<typename Value, typename Comp = std::less<Value> >
-  binary_heap<Value, Comp, std::vector>
-  make_binary_heap(const Comp& comp = Comp()) {
-    return binary_heap<Value, Comp, std::vector>();
+  
+  template<typename Value>
+  binary_heap<Value, internal::id_func, std::less<Value>, std::vector>
+  make_binary_heap() {
+    return binary_heap<Value, internal::id_func, std::less<Value>, std::vector>(internal::id_func(), std::less<Value>());
+  }
+  template<typename Value,
+	   typename PriorityEx = internal::id_func,
+	   typename Comp = std::less<Value> >
+  binary_heap<Value, PriorityEx, Comp, std::vector>
+  make_binary_heap(const PriorityEx& priority_ex,
+		   const Comp& comp = Comp()) {
+    return binary_heap<Value, PriorityEx, Comp, std::vector>(priority_ex, comp);
   }
 
 } // namespace com_masaers
