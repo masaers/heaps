@@ -11,7 +11,7 @@ CXXFLAGS+=-Wall -pedantic -std=c++11 -g -O3
 LDFLAGS=
 
 PROG_NAMES=
-TEST_NAMES=binary_heap_test
+TEST_NAMES=binary_heap_test mutable_heap_test
 
 #
 # Derived settings
